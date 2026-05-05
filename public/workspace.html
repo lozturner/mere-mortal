@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Infinite Workspace</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root { --p: 1200px; }
+body { margin: 0; overflow: hidden; background: #010101; color: #fff; font-family: system-ui; perspective: var(--p); height: 100vh; user-select: none; }
+#scene { position: absolute; width: 100%; height: 100%; transform-style: preserve-3d; transition: transform 1s cubic-bezier(0.2, 0, 0.2, 1); }
+#canvas { position: absolute; top: 0; left: 0; transform-style: preserve-3d; transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+.slide { position: absolute; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; padding: 5vw; box-sizing: border-box; background: #080808; border: 1px solid #222; backface-visibility: hidden; }
+.slide::after { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle, #1a1a1a 1px, transparent 1px); background-size: 50px 50px; opacity: 0.3; pointer-events: none; }
+
+.order-badge {
+  position: absolute; top: 40px; right: 40px; width: 60px; height: 60px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 24px; font-weight: 900; background: #3b82f6; color: white;
+  opacity: 0; transition: opacity 0.3s, background 0.3s; pointer-events: none; z-index: 20;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+}
+body.show-order .order-badge, body.edit-mode .order-badge { opacity: 1; }
+body.edit-mode .order-badge { pointer-events: auto; cursor: grab; background: #ef4444; border: 4px solid #fff; }
+
+.big-text { font-size: 8.5vw; font-weight: 900; line-height: 0.8; letter-spacing: -0.07em; text-transform: uppercase; text-align: right; }
+
+.panel { position: fixed; background: rgba(10, 10, 10, 0.85); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; z-index: 1000; box-shadow: 0 10px 40px rgba(0,0,0,0.9); }
+.handle { padding: 8px 12px; cursor: move; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between; font-size: 9px; font-weight: 800; opacity: 0.6; text-transform: uppercase; letter-spacing: 1px; }
+.content { padding: 12px; display: flex; gap: 6px; align-items: center; }
+
+.btn { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.8); }
+.btn:hover { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); }
+.btn.active { background: #3b82f6; color: white; border-color: #60a5fa; }
+
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+#path-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity 0.5s; z-index: 5; overflow: visible; }
+body.edit-mode #path-layer { opacity: 1; }
+.path-line { stroke: rgba(255, 255, 255, 0.35); stroke-dasharray: 12, 12; fill: none; stroke-width: 4; }
+.eyeball { fill: white; filter: drop-shadow(0 0 10px #fff); }
+</style>
+</head>
+<body class="mode-2d">
+
+<svg id="path-layer">
+  <path id="play-path" class="path-line" d=""></path>
+  <g id="eye-group">
+    <circle class="eyeball" r="15"></circle>
+    <circle fill="black" r="6" cx="4"></circle>
+  </g>
+</svg>
+
+<div class="panel" style="top: 20px; left: 50%; transform: translateX(-50%);">
+  <div class="handle">Viewports</div>
+  <div class="content">
+    <button class="btn" title="POV" onclick="setView('front')"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></button>
+    <button class="btn" title="TOP" onclick="setView('top')"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="4" y1="12" x2="20" y2="12"/></svg></button>
+    <button class="btn" title="SIDE" onclick="setView('right')"><svg viewBox="0 0 24 24"><path d="M4 14l8-8 8 8M4 20h16"/></svg></button>
+    <button class="btn" title="ISO" onclick="setView('iso')"><svg viewBox="0 0 24 24"><path d="M12 2l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5"/></svg></button>
+    <button class="btn" title="SET BACK" onclick="setView('setback')"><svg viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+  </div>
+</div>
+
+<div class="panel" style="bottom: 20px; left: 50%; transform: translateX(-50%);">
+  <div class="handle">Presentation Controls</div>
+  <div class="content">
+    <button class="btn" title="Beginning" onclick="goToStart()"><svg viewBox="0 0 24 24"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>
+    <button class="btn" title="Previous" onclick="stepPrev()"><svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+
+    <button class="btn px-6 h-10" id="playBtn" onmouseenter="document.body.classList.add('show-order')" onmouseleave="document.body.classList.remove('show-order')">
+      <svg viewBox="0 0 24 24" fill="currentColor" id="playIcon"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      <span class="ml-2 text-[11px] font-black" id="playStatus">PLAY</span>
+    </button>
+
+    <button class="btn" title="Next" onclick="stepNext()"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg></button>
+    <button class="btn" title="End" onclick="goToEnd()"><svg viewBox="0 0 24 24"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>
+
+    <div class="h-6 w-px bg-white/10 mx-2"></div>
+
+    <button class="btn px-4" id="editToggleBtn" onclick="toggleEdit()">
+      <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <span class="ml-2 text-[10px] font-bold">EDIT</span>
+    </button>
+
+    <div class="flex flex-col items-center ml-2">
+      <span class="text-[8px] opacity-40 mb-1 uppercase">Speed</span>
+      <input type="range" id="speedSlider" min="1" max="10" value="3" oninput="updateSpeed()">
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="top: 20px; right: 20px;">
+  <div class="handle">3D Matrix</div>
+  <div class="content"><button class="btn w-full px-6 py-2 text-[11px] font-black" onclick="toggle3D()" id="modeBtn">2D PLANE</button></div>
+</div>
+
+<div id="scene">
+  <div id="canvas">
+    <div class="slide" data-id="0" style="transform: translate3d(0, 0, 0);">
+      <div class="order-badge">1</div>
+      <h1 class="big-text max-w-5xl">I've come into possession of this tool AI that does, I think, now evaluate what all things it can do.</h1>
+    </div>
+    <div class="slide" data-id="1" style="transform: translate3d(100vw, 0, 0);"><div class="order-badge">2</div><h2 class="text-[10vw] font-black italic">FAST</h2></div>
+    <div class="slide" data-id="2" style="transform: translate3d(0, 100vh, 0);"><div class="order-badge">3</div><h2 class="text-[10vw] font-black italic">LIMINAL</h2></div>
+    <div class="slide" data-id="3" style="transform: translate3d(-100vw, 0, 0);"><div class="order-badge">4</div><h2 class="text-[10vw] font-black italic">SPATIAL</h2></div>
+    <div class="slide" data-id="4" style="transform: translate3d(0, -100vh, 0);"><div class="order-badge">5</div><h2 class="text-[10vw] font-black italic">HILBERT</h2></div>
+  </div>
+</div>
+
+<script>
+let curX = 0, curY = 0, is3D = false, playing = false, playInt;
+let editMode = false;
+let playSpeed = 3000;
+let camZ = 0, camRX = 0, camRY = 0;
+let camScale = 1;
+
+const canvas = document.getElementById('canvas');
+const scene = document.getElementById('scene');
+const playBtn = document.getElementById('playBtn');
+const speedSlider = document.getElementById('speedSlider');
+const pathLine = document.getElementById('play-path');
+const eyeGroup = document.getElementById('eye-group');
+const pathLayer = document.getElementById('path-layer');
+
+const slideCoords = [[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1]];
+let playOrder = [0, 1, 2, 3, 4];
+let slideIdx = 0;
+
+// Draggable panels
+document.querySelectorAll('.panel').forEach(p => {
+  const h = p.querySelector('.handle');
+  let d = false, ox, oy;
+  h.onmousedown = e => { d = true; ox = e.clientX - p.offsetLeft; oy = e.clientY - p.offsetTop; p.style.zIndex = 1001; e.stopPropagation(); };
+  window.addEventListener('mousemove', e => { if(d) { p.style.left=(e.clientX-ox)+'px'; p.style.top=(e.clientY-oy)+'px'; p.style.right='auto'; p.style.bottom='auto'; p.style.transform='none'; }});
+  window.addEventListener('mouseup', () => d = false);
+});
+
+function update() {
+  canvas.style.transform = `translate3d(${curX}px, ${curY}px, 0) scale(${camScale})`;
+  scene.style.transform = `translateZ(${camZ}px) rotateX(${camRX}deg) rotateY(${camRY}deg)`;
+}
+
+function toggle3D() {
+  is3D = !is3D;
+  document.body.classList.toggle('mode-3d', is3D);
+  document.getElementById('modeBtn').innerText = is3D ? "3D SPACE" : "2D PLANE";
+  if(!is3D) { camZ = 0; camRX = 0; camRY = 0; }
+  else { camZ = -2200; camRX = 25; camRY = -25; }
+  if(editMode && is3D) toggleEdit();
+  update();
+}
+
+function setView(v) {
+  if(!is3D) toggle3D();
+  if (v === 'front')   { camZ = -2200; camRX = 0;  camRY = 0; }
+  if (v === 'top')     { camZ = -3500; camRX = 90; camRY = 0; }
+  if (v === 'right')   { camZ = -2500; camRX = 0;  camRY = -90; }
+  if (v === 'iso')     { camZ = -2800; camRX = 35; camRY = -35; }
+  if (v === 'setback') { camZ = -6000; camRX = 5;  camRY = 0; }
+  update();
+}
+
+function updateBadges() {
+  document.querySelectorAll('.slide').forEach((s) => {
+    const badge = s.querySelector('.order-badge');
+    const orderIdx = playOrder.indexOf(parseInt(s.dataset.id));
+    badge.innerText = orderIdx + 1;
+    badge.style.background = `hsl(${orderIdx * 60}, 70%, 45%)`;
+  });
+  if(editMode) drawPath();
+}
+
+function toggleEdit() {
+  editMode = !editMode;
+  document.body.classList.toggle('edit-mode', editMode);
+  document.getElementById('editToggleBtn').classList.toggle('active', editMode);
+  if(editMode) {
+    is3D = false;
+    document.body.classList.remove('mode-3d');
+    document.getElementById('modeBtn').innerText = "2D PLANE";
+    camZ = 0; camRX = 0; camRY = 0;
+    camScale = 0.35;
+    curX = 0; curY = 0;
+    update();
+    drawPath();
+    requestAnimationFrame(animateEye);
+  } else {
+    camScale = 1;
+    update();
+  }
+}
+
+function drawPath() {
+  const w = window.innerWidth, h = window.innerHeight;
+  let d = "";
+  playOrder.forEach((id, i) => {
+    const [sx, sy] = slideCoords[id];
+    // path layer is screen-space; slides live in canvas-space (translated+scaled)
+    const px = (sx * w + w/2) * camScale + curX + w/2 - (w/2) * camScale + (w/2) - (w/2);
+    const py = (sy * h + h/2) * camScale + curY + h/2 - (h/2) * camScale + (h/2) - (h/2);
+    // simpler: canvas origin at (0,0); slide center at (sx*w + w/2, sy*h + h/2) in canvas coords.
+    // canvas transformed by translate(curX,curY) scale(camScale) about origin (0,0).
+    // screen pos = curX + (sx*w + w/2)*camScale ; same for y
+    const sxp = curX + (sx * w + w/2) * camScale;
+    const syp = curY + (sy * h + h/2) * camScale;
+    d += (i === 0 ? "M" : "L") + sxp + "," + syp;
+  });
+  pathLine.setAttribute("d", d);
+}
+
+let eyeStart = null;
+function animateEye(time) {
+  if (!editMode) { eyeStart = null; return; }
+  if (!eyeStart) eyeStart = time;
+  const len = pathLine.getTotalLength();
+  if (len > 0) {
+    const progress = ((time - eyeStart) % 5000) / 5000;
+    const pt = pathLine.getPointAtLength(progress * len);
+    eyeGroup.setAttribute("transform", `translate(${pt.x}, ${pt.y})`);
+  }
+  requestAnimationFrame(animateEye);
+}
+
+function updateSpeed() {
+  playSpeed = (11 - speedSlider.value) * 1000;
+  if(playing) { clearInterval(playInt); playInt = setInterval(playNext, playSpeed); }
+}
+
+function goToStart() { slideIdx = 0; jumpToSlide(); }
+function goToEnd() { slideIdx = playOrder.length - 1; jumpToSlide(); }
+function stepNext() { slideIdx = (slideIdx + 1) % playOrder.length; jumpToSlide(); }
+function stepPrev() { slideIdx = (slideIdx - 1 + playOrder.length) % playOrder.length; jumpToSlide(); }
+
+function jumpToSlide() {
+  const targetId = playOrder[slideIdx];
+  curX = slideCoords[targetId][0] * -window.innerWidth;
+  curY = slideCoords[targetId][1] * -window.innerHeight;
+  update();
+}
+
+playBtn.onclick = () => {
+  if (editMode) toggleEdit();
+  playing = !playing;
+  playBtn.classList.toggle('active', playing);
+  if(playing) {
+    if(is3D) toggle3D();
+    document.getElementById('playStatus').innerText = "PAUSE";
+    document.getElementById('playIcon').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+    playNext();
+    playInt = setInterval(playNext, playSpeed);
+  } else {
+    clearInterval(playInt);
+    document.getElementById('playStatus').innerText = "PLAY";
+    document.getElementById('playIcon').innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+  }
+};
+
+function playNext() { stepNext(); }
+
+// Drag-to-swap badges in edit mode
+let draggedId = null;
+document.querySelectorAll('.order-badge').forEach(badge => {
+  badge.addEventListener('mousedown', (e) => {
+    if (!editMode) return;
+    e.stopPropagation();
+    draggedId = parseInt(badge.closest('.slide').dataset.id);
+  });
+});
+
+// Wheel zoom
+window.addEventListener('wheel', e => {
+  if (editMode) {
+    camScale = Math.max(0.05, Math.min(2, camScale * (e.deltaY > 0 ? 0.9 : 1.1)));
+  } else {
+    camZ -= e.deltaY * 2;
+  }
+  update();
+  if (editMode) drawPath();
+}, { passive: true });
+
+// Pan + swap unified mouse handlers
+let sX, sY, dX=0, dY=0, down=false, panning=false;
+window.addEventListener('mousedown', e => {
+  if (e.target.closest('.panel')) return;
+  if (e.target.closest('.order-badge') && editMode) return; // let badge handle
+  down = true; panning = true;
+  sX = e.clientX; sY = e.clientY;
+  canvas.style.transition = 'none';
+  scene.style.transition = 'none';
+});
+window.addEventListener('mousemove', e => {
+  if (!down || !panning) return;
+  dX = e.clientX - sX; dY = e.clientY - sY;
+  canvas.style.transform = `translate3d(${curX+dX}px, ${curY+dY}px, 0) scale(${camScale})`;
+  if (editMode) {
+    // also live-update path
+    const tmpX = curX+dX, tmpY = curY+dY;
+    const w = window.innerWidth, h = window.innerHeight;
+    let d = "";
+    playOrder.forEach((id, i) => {
+      const [sx, sy] = slideCoords[id];
+      const sxp = tmpX + (sx * w + w/2) * camScale;
+      const syp = tmpY + (sy * h + h/2) * camScale;
+      d += (i === 0 ? "M" : "L") + sxp + "," + syp;
+    });
+    pathLine.setAttribute("d", d);
+  }
+});
+window.addEventListener('mouseup', e => {
+  // badge swap
+  if (editMode && draggedId !== null) {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const hoverSlide = el && el.closest && el.closest('.slide');
+    if (hoverSlide) {
+      const targetId = parseInt(hoverSlide.dataset.id);
+      if (draggedId !== targetId) {
+        const i1 = playOrder.indexOf(draggedId);
+        const i2 = playOrder.indexOf(targetId);
+        [playOrder[i1], playOrder[i2]] = [playOrder[i2], playOrder[i1]];
+        updateBadges();
+      }
+    }
+    draggedId = null;
+    panning = false; down = false;
+    canvas.style.transition = 'transform 0.8s cubic-bezier(0.16, 1, 0.3, 1)';
+    scene.style.transition = 'transform 1s cubic-bezier(0.2, 0, 0.2, 1)';
+    return;
+  }
+  if (!down) return;
+  down = false; panning = false;
+  curX += dX; curY += dY;
+  if (!editMode) {
+    curX = Math.round(curX/window.innerWidth)*window.innerWidth;
+    curY = Math.round(curY/window.innerHeight)*window.innerHeight;
+  }
+  dX = 0; dY = 0;
+  canvas.style.transition = 'transform 0.8s cubic-bezier(0.16, 1, 0.3, 1)';
+  scene.style.transition = 'transform 1s cubic-bezier(0.2, 0, 0.2, 1)';
+  update();
+  if (editMode) drawPath();
+});
+
+// Keyboard
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); toggle3D(); }
+  if (e.code === 'ArrowRight') stepNext();
+  if (e.code === 'ArrowLeft') stepPrev();
+});
+
+// Right-click play -> edit
+playBtn.addEventListener('contextmenu', e => { e.preventDefault(); toggleEdit(); });
+
+window.addEventListener('resize', () => { if (editMode) drawPath(); });
+
+updateBadges();
+</script>
+</body>
+</html>
